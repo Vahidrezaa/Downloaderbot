@@ -28,6 +28,8 @@ SPOTIFY_CLIENT_ID = os.environ.get('SPOTIFY_CLIENT_ID')
 SPOTIFY_CLIENT_SECRET = os.environ.get('SPOTIFY_CLIENT_SECRET')
 MAX_FILE_SIZE = int(os.environ.get('MAX_FILE_SIZE', 400))  # مگابایت
 MAX_SPOTIFY_TRACKS = int(os.environ.get('MAX_SPOTIFY_TRACKS', 10))
+PORT = int(os.environ.get('PORT', '8443'))
+WEBHOOK_URL = os.environ.get('WEBHOOK_URL')  # مثلا https://your-app-name.onrender.com
 
 # تنظیمات لاگ
 logging.basicConfig(
@@ -326,20 +328,23 @@ async def send_media_group(media_list, message, caption=None):
                 os.remove(temp_file)
 
 def main():
-    """تابع اصلی اجرای ربات"""
-    if not TOKEN:
-        logger.error("❌ توکن ربات تنظیم نشده است!")
+    if not TOKEN or not WEBHOOK_URL:
+        logger.error("❌ توکن یا URL وب‌هوک تنظیم نشده است!")
         return
-    
-    # ساخت اپلیکیشن تلگرام
+
+    # ساخت اپلیکیشن
     application = Application.builder().token(TOKEN).build()
-    
+
     # ثبت هندلرها
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND, 
-        handle_message
-    ))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    # راه‌اندازی Webhook
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        webhook_url=f"{WEBHOOK_URL}/webhook/{TOKEN}"
+    )
     
     # شروع ربات
     logger.info("🤖 در حال راه‌اندازی ربات...")
