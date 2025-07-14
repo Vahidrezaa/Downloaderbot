@@ -3,3 +3,4 @@ yt-dlp
 instaloader
 requests
 spotipy
+aiohttp
