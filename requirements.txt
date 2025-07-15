@@ -4,3 +4,4 @@ instaloader
 requests
 spotipy
 aiohttp
+python-telegram-bot[webhooks]
