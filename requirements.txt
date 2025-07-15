@@ -1,3 +1,4 @@
-python-telegram-bot==20.3
-pytube==15.0.0
-yt-dlp==2024.4.9
+python-telegram-bot==20.7
+yt-dlp==2023.12.30
+instaloader==4.10.3
+requests==2.31.0
