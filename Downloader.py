@@ -28,13 +28,51 @@ class MediaBot:
     async def download_instagram_reel(self, url: str) -> str:
         """دانلود ریلز اینستاگرام"""
         try:
+            # استفاده از yt-dlp برای اینستاگرام
+            ydl_opts = {
+                'format': 'best',
+                'outtmpl': os.path.join(self.temp_dir, 'instagram_%(id)s.%(ext)s'),
+                'quiet': True,
+                'no_warnings': True,
+                'extractor_args': {
+                    'instagram': {
+                        'comment_count': 0,
+                        'like_count': 0,
+                    }
+                }
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                try:
+                    info = ydl.extract_info(url, download=True)
+                    video_id = info['id']
+                    ext = info.get('ext', 'mp4')
+                    video_path = os.path.join(self.temp_dir, f"instagram_{video_id}.{ext}")
+                    
+                    if os.path.exists(video_path):
+                        return video_path
+                except Exception as e:
+                    logger.error(f"خطا در دانلود با yt-dlp: {e}")
+                    # اگر yt-dlp کار نکرد، از instaloader استفاده کن
+                    return await self.download_instagram_fallback(url)
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"خطا در دانلود ریلز اینستاگرام: {e}")
+            return None
+    
+    async def download_instagram_fallback(self, url: str) -> str:
+        """روش جایگزین برای دانلود اینستاگرام"""
+        try:
             L = instaloader.Instaloader(
                 download_videos=True,
                 download_video_thumbnails=False,
                 download_geotags=False,
                 download_comments=False,
                 save_metadata=False,
-                compress_json=False
+                compress_json=False,
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             )
             
             # استخراج shortcode از URL
@@ -58,27 +96,36 @@ class MediaBot:
             return None
             
         except Exception as e:
-            logger.error(f"خطا در دانلود ریلز اینستاگرام: {e}")
+            logger.error(f"خطا در fallback method: {e}")
             return None
     
     async def download_youtube_short(self, url: str) -> str:
         """دانلود شورت یوتوب"""
         try:
             ydl_opts = {
-                'format': 'best[height<=720]',
-                'outtmpl': os.path.join(self.temp_dir, '%(id)s.%(ext)s'),
+                'format': 'best[height<=720]/best',
+                'outtmpl': os.path.join(self.temp_dir, 'youtube_%(id)s.%(ext)s'),
                 'quiet': True,
                 'no_warnings': True,
+                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
             }
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 video_id = info['id']
-                ext = info['ext']
-                video_path = os.path.join(self.temp_dir, f"{video_id}.{ext}")
+                ext = info.get('ext', 'mp4')
+                video_path = os.path.join(self.temp_dir, f"youtube_{video_id}.{ext}")
                 
                 if os.path.exists(video_path):
                     return video_path
+                    
+                # اگر فایل با نام دیگری ذخیره شده باشد
+                for file in os.listdir(self.temp_dir):
+                    if video_id in file and file.startswith('youtube_'):
+                        return os.path.join(self.temp_dir, file)
                 
             return None
             
@@ -144,13 +191,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         video_path = None
         
         if url_type == 'instagram':
+            logger.info(f"دانلود ریلز اینستاگرام: {url}")
             video_path = await media_bot.download_instagram_reel(url)
         elif url_type == 'youtube':
+            logger.info(f"دانلود شورت یوتوب: {url}")
             video_path = await media_bot.download_youtube_short(url)
         
         if video_path and os.path.exists(video_path):
             # بررسی سایز فایل (حداکثر 50MB برای تلگرام)
             file_size = os.path.getsize(video_path)
+            logger.info(f"حجم فایل: {file_size / (1024*1024):.2f} MB")
+            
             if file_size > 50 * 1024 * 1024:  # 50MB
                 await processing_msg.edit_text("❌ حجم فایل بیش از حد مجاز است (حداکثر 50MB)")
                 return
@@ -159,7 +210,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             with open(video_path, 'rb') as video_file:
                 await message.reply_video(
                     video=video_file,
-                    caption=f"📹 دانلود شده از: {url_type.title()}\n🔗 لینک اصلی: {url}"
+                    caption=f"📹 دانلود شده از: {url_type.title()}\n🔗 لینک اصلی: {url}",
+                    supports_streaming=True
                 )
             
             # حذف پیام پردازش
@@ -167,13 +219,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # پاکسازی فایل دانلود شده
             os.remove(video_path)
+            logger.info("فایل با موفقیت ارسال و پاک شد")
             
         else:
-            await processing_msg.edit_text("❌ خطا در دانلود ویدیو. لطفاً دوباره امتحان کنید.")
+            error_msg = f"❌ خطا در دانلود ویدیو از {url_type}.\n"
+            error_msg += "احتمالاً ویدیو private است یا لینک اشتباه است."
+            await processing_msg.edit_text(error_msg)
+            logger.error(f"دانلود ناموفق: {url}")
     
     except Exception as e:
         logger.error(f"خطا در پردازش پیام: {e}")
-        await processing_msg.edit_text("❌ خطا در پردازش درخواست")
+        await processing_msg.edit_text(f"❌ خطا در پردازش درخواست: {str(e)}")
     
     finally:
         # پاکسازی فایل‌های موقت
